@@ -6,11 +6,12 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
 export default defineConfig({
+  build: { outDir: 'docs' },
   plugins: [
     vue(),
     vueDevTools(),
   ],
-  assetsInclude: ['**/*.exr'],
+  base: '/three.js/',
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))

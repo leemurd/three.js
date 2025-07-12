@@ -6,6 +6,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
+import type { OrbitControls as OC } from 'three/examples/jsm/controls/OrbitControls'
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js'
 import woodTextureUrl from '@/assets/img/textures/wood.jpg'
 import bgUrl from '@/assets/img/textures/bg.jpg'
@@ -20,7 +21,7 @@ const doorHeight = ref(1.7)
 let scene: THREE.Scene
 let camera: THREE.PerspectiveCamera
 let renderer: THREE.WebGLRenderer
-let controls: OrbitControls
+let controls: InstanceType<typeof OC>
 let doorGroup: THREE.Group
 
 function onWindowResize() {
