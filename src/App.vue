@@ -9,7 +9,3 @@
 <script lang="ts" setup>
 import ThreeScene from '@/components/ThreeScene.vue'
 </script>
-
-<style>
-
-</style>
