@@ -17,8 +17,14 @@ import doorModelUrl from '@/assets/models/Door.glb?url'
 
 const container = ref<HTMLDivElement>()
 
-const doorWidth = ref(1)
-const doorHeight = ref(1.7)
+// initial dimensions and aspect ratio for primitive door
+const initialPrimWidth = 1
+const initialPrimHeight = 1.7
+const primAspect = initialPrimWidth / initialPrimHeight
+
+// separate heights for primitive and model doors
+const primDoorHeight = ref(initialPrimHeight)
+const modelDoorHeight = ref(initialPrimHeight)
 
 let scene: THREE.Scene
 let camera: THREE.PerspectiveCamera
@@ -26,17 +32,46 @@ let renderer: THREE.WebGLRenderer
 let controls: InstanceType<typeof OC>
 let doorGroup: THREE.Group
 
-// Handle window resize
-function onWindowResize() {
-  const w = container.value!.clientWidth
-  const h = container.value!.clientHeight
-  camera.aspect = w / h
-  camera.updateProjectionMatrix()
-  renderer.setSize(w, h)
+// mesh references for updates
+let primDoorMesh: THREE.Mesh
+let handleMesh: THREE.Mesh
+let gltfModel: THREE.Object3D | null = null
+const originalSize = new THREE.Vector3()
+const originalCenter = new THREE.Vector3()
+let modelAspect = 1
+
+// update scales and positions without recreating meshes
+function updateDoorMeshes() {
+  const gap = 0.2
+
+  // primitive door: compute width from height
+  const primWidth = primDoorHeight.value * primAspect
+  primDoorMesh.scale.set(primWidth, primDoorHeight.value, 1)
+  primDoorMesh.position.set(-(primWidth + gap) / 2, primDoorHeight.value / 2, -3)
+
+  // handle follows primitive door
+  handleMesh.position.set(
+    primDoorMesh.position.x + primWidth / 2 - 0.1,
+    primDoorHeight.value / 2,
+    -2.94
+  )
+
+  // model door: scale uniformly based on its original aspect
+  if (gltfModel) {
+    const scaleY = modelDoorHeight.value / originalSize.y
+    gltfModel.scale.set(scaleY, scaleY, scaleY)
+    // reposition so bottom rests on floor
+    const modelWidth = modelAspect * modelDoorHeight.value
+    gltfModel.position.set(
+      (modelWidth + gap) / 2,
+      -originalCenter.y * scaleY + modelDoorHeight.value / 2,
+      -3
+    )
+  }
 }
 
 onMounted(() => {
-  // Initialize scene and environment
+  // basic scene setup
   scene = new THREE.Scene()
   new THREE.TextureLoader().load(bgUrl, tex => {
     tex.mapping = THREE.EquirectangularReflectionMapping
@@ -44,31 +79,28 @@ onMounted(() => {
     scene.environment = tex
   })
 
-  // Set up camera
   camera = new THREE.PerspectiveCamera(
     75,
     container.value!.clientWidth / container.value!.clientHeight,
     0.51,
     200
   )
-  camera.position.set(0, 1.6, doorWidth.value * 4)
+  camera.position.set(0, 1.6, initialPrimWidth * 4)
 
-  // Create renderer
   renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setSize(container.value!.clientWidth, container.value!.clientHeight)
   renderer.shadowMap.enabled = true
   container.value!.appendChild(renderer.domElement)
 
-  // Set up orbit controls
   controls = new OrbitControls(camera, renderer.domElement)
-  controls.target.set(0, doorHeight.value / 2, 0)
+  controls.target.set(0, initialPrimHeight / 2, 0)
 
-  // GUI for adjusting door dimensions
+  // GUI with only height controls for each door
   const gui = new GUI()
-  gui.add(doorWidth, 'value', 0.5, 5, 0.1).name('Door Width')
-  gui.add(doorHeight, 'value', 1, 5, 0.1).name('Door Height')
+  gui.add(primDoorHeight, 'value', 0.5, 5, 0.1).name('Primitive Door Height')
+  gui.add(modelDoorHeight, 'value', 0.5, 5, 0.1).name('Model Door Height')
 
-  // Demo primitives for scene context
+  // primitives for context
   const box = new THREE.Mesh(
     new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ color: 0x0077ff, metalness: 0.6, roughness: 0.2 })
@@ -85,93 +117,60 @@ onMounted(() => {
   sphere.position.set(2, 0.5, 0)
   scene.add(sphere)
 
-  // Group to hold both doors
+  // group to hold both doors
   doorGroup = new THREE.Group()
   scene.add(doorGroup)
 
-  // Function to rebuild doors when dimensions change
-  function rebuildDoor() {
-    doorGroup.clear()
+  // build primitive door unit geometry for scaling
+  primDoorMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 0.1),
+    new THREE.MeshStandardMaterial({ map: new THREE.TextureLoader().load(woodTextureUrl), metalness: 0.1, roughness: 0.8 })
+  )
+  primDoorMesh.castShadow = true
+  doorGroup.add(primDoorMesh)
 
-    const gap = 0.2 // distance between the two doors
+  // build handle
+  handleMesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.03, 0.03, 0.2, 16),
+    new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8, roughness: 0.2 })
+  )
+  handleMesh.castShadow = true
+  handleMesh.rotation.z = Math.PI / 2
+  doorGroup.add(handleMesh)
 
-    // 1) Primitive door
-    const primX = -(doorWidth.value + gap) / 2
-    const doorMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(doorWidth.value, doorHeight.value, 0.1),
-      new THREE.MeshStandardMaterial({
-        map: new THREE.TextureLoader().load(woodTextureUrl),
-        metalness: 0.1,
-        roughness: 0.8
-      })
-    )
-    doorMesh.castShadow = true
-    doorMesh.position.set(primX, doorHeight.value / 2, -3)
-    doorGroup.add(doorMesh)
+  // load GLTF model once and store original size
+  const loader = new GLTFLoader()
+  loader.load(
+    doorModelUrl,
+    gltf => {
+      gltfModel = gltf.scene
+      const bbox = new THREE.Box3().setFromObject(gltfModel)
+      bbox.getSize(originalSize)
+      bbox.getCenter(originalCenter)
+      modelAspect = originalSize.x / originalSize.y
+      gltfModel.traverse(node => { if ((node as THREE.Mesh).isMesh) node.castShadow = true })
+      doorGroup.add(gltfModel)
+      updateDoorMeshes()
+    },
+    undefined,
+    err => console.error('Error loading door model:', err)
+  )
 
-    const handle = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.03, 0.03, 0.2, 16),
-      new THREE.MeshStandardMaterial({ color: 0xaaaaaa, metalness: 0.8, roughness: 0.2 })
-    )
-    handle.castShadow = true
-    handle.rotation.z = Math.PI / 2
-    handle.position.set(
-      primX + doorWidth.value / 2 - 0.1,
-      doorHeight.value / 2,
-      -2.94
-    )
-    doorGroup.add(handle)
+  // initial mesh update
+  updateDoorMeshes()
 
-    // 2) GLTF door model
-    const loader = new GLTFLoader()
-    loader.load(
-      doorModelUrl,
-      gltf => {
-        const model = gltf.scene
-
-        // Compute bounding box of the model
-        const bbox = new THREE.Box3().setFromObject(model)
-        const size = bbox.getSize(new THREE.Vector3())
-        const center = bbox.getCenter(new THREE.Vector3())
-
-        // Scale model to match door dimensions
-        const scaleX = doorWidth.value / size.x
-        const scaleY = doorHeight.value / size.y
-        model.scale.set(scaleX, scaleY, scaleX)
-
-        // Position model so its bottom rests on the floor
-        const modelX = (doorWidth.value + gap) / 2
-        const modelY = -center.y * scaleY + doorHeight.value / 2
-        model.position.set(modelX, modelY, -3)
-
-        // Enable shadows for all meshes in the model
-        model.traverse(node => {
-          if ((node as THREE.Mesh).isMesh) node.castShadow = true
-        })
-
-        doorGroup.add(model)
-      },
-      undefined,
-      err => console.error('Error loading door model:', err)
-    )
-  }
-
-  rebuildDoor()
-  watch([doorWidth, doorHeight], rebuildDoor)
-
-  // Lighting setup
+  // lighting
   const dirLight = new THREE.DirectionalLight(0xffffff, 1)
   dirLight.position.set(5, 10, 5)
   dirLight.castShadow = true
   scene.add(dirLight)
   scene.add(new THREE.AmbientLight(0xffffff, 0.3))
 
-  // Floor setup
+  // floor
   const floorTex = new THREE.TextureLoader().load(floorTextureUrl)
   floorTex.wrapS = THREE.RepeatWrapping
   floorTex.wrapT = THREE.RepeatWrapping
   floorTex.repeat.set(20, 20)
-
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(40, 40),
     new THREE.MeshStandardMaterial({ map: floorTex, side: THREE.DoubleSide })
@@ -180,19 +179,30 @@ onMounted(() => {
   ground.receiveShadow = true
   scene.add(ground)
 
+  // watchers to respond to height changes
+  watch([primDoorHeight, modelDoorHeight], updateDoorMeshes)
+
+  // handle window resize
+  function onWindowResize() {
+    const w = container.value!.clientWidth
+    const h = container.value!.clientHeight
+    camera.aspect = w / h
+    camera.updateProjectionMatrix()
+    renderer.setSize(w, h)
+  }
   window.addEventListener('resize', onWindowResize)
 
-  // Animation loop
+  // render loop
   ;(function animate() {
     controls.update()
     renderer.render(scene, camera)
     requestAnimationFrame(animate)
   })()
-})
 
-onUnmounted(() => {
-  window.removeEventListener('resize', onWindowResize)
-  controls.dispose()
-  renderer.dispose()
+  onUnmounted(() => {
+    window.removeEventListener('resize', onWindowResize)
+    controls.dispose()
+    renderer.dispose()
+  })
 })
 </script>
